@@ -1,0 +1,389 @@
+#main.py
+import pyttsx3
+import speech_recognition as sr
+# Initialize the recognizer and the TTS engine
+r = sr.Recognizer()
+engine = pyttsx3.init()
+
+
+def speak(text):
+    engine.say(text)
+    engine.runAndWait()
+
+
+
+def listen():
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        speak("Speak Now")
+        audio = r.record(source, duration=5)  # Listen for 5 seconds
+        try:
+            text = r.recognize_google(audio)
+            print("You said : {}".format(text))
+            speak("You said : {}".format(text))
+            return(text)
+        except:
+            print("Sorry could not recognize your voice")
+            speak("Sorry could not recognize your voice")
+            return('5')
+    
+
+
+def capture_image(image_path):
+    picam2 = Picamera2()
+    camera_config = picam2.create_still_configuration(main={"size": (1920, 1080)}, lores={"size": (640, 480)}, display="lores")
+    picam2.configure(camera_config)
+    picam2.set_controls({
+        "ExposureTime": 32680, 
+        "AnalogueGain": 3.9, 
+        # "DigitalGain": 1.1,  # Adjust the Digital Gain here
+        "AfMode": controls.AfModeEnum.Continuous,  # Set the autofocus mode to Continuous
+        "AfSpeed": controls.AfSpeedEnum.Fast  # Set the autofocus speed to Fast
+    })
+    picam2.start()
+    speak("Focusing image Please wait")
+    time.sleep(5)
+    picam2.capture_file(image_path)
+    picam2.stop()
+    picam2.close()
+    
+
+def main():
+    while True:
+        try:
+            speak("Please select an option:")
+            speak("1. Extract text from scene")
+            speak("2. Avoid obstacle")
+            speak("3. Predict image caption")
+            speak("4. Exit")
+            print("here")
+            
+            choice = input()
+            image_path = '/home/austine/Desktop/final_proj/captured_image.jpg'             #change this location to where you want to save the image or the duirectory where the image will be amnupilated
+            if os.path.isfile(image_path):
+                os.remove(image_path)
+                print(f'File {image_path} has been deleted.')
+            else:
+                print(f'No file found at {image_path}.')
+
+            if choice in ['4', 'four', 'exit']:
+                speak("Exiting the program.")
+                break
+
+            if choice in ['1', 'one', 'extract']:
+                speak("initiating text extraction")
+                speak("capturing image")
+                capture_image(image_path)
+                speak("image captured and processing")
+                result = extract_text_from_scene(image_path)
+                print(result)
+                speak(result)
+                time.sleep(1)
+
+            elif choice in ['2', 'two', 'to', 'avoid']:
+                speak("initiating obstecle avoidence")
+                avoid_obstacle()
+                time.sleep(1)
+
+            elif choice in ['3', 'three', 'image caption']:
+                speak("initiating image captioning")
+                speak("capturing image")
+                capture_image(image_path)
+                speak("image captured and processing")
+                result = predict_caption(image_path)
+                print(result)
+                speak(result)
+                time.sleep(1)
+
+            elif choice == '5':
+                speak("please try again")
+            else:
+                speak("Invalid choice. Please say 1, 2, 3 or 4.")
+        except Exception as e:
+            speak("An unknown error occurred.")
+            print(f"Error: {e}")
+            continue
+
+if __name__ == "__main__":
+    speak("initializing please wait")
+    from picamera2 import Picamera2, Preview
+    import time
+    import os
+    speak("loading features")
+    from libcamera import controls
+    from final_obstacl_avoidnce import main as avoid_obstacle
+    from image_captioning_final import main as predict_caption
+    from final_ocr import extract_text_from_scene
+    picam2 = Picamera2()
+    picam2.start()
+    picam2.stop()
+    picam2.close()
+    main()
+
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+#final_obstacl_avoidence.py
+import cv2
+import numpy as np
+from ultralytics import YOLO
+from ultralytics.utils.plotting import Annotator
+from picamera2 import Picamera2
+import matplotlib.pyplot as plt
+import pyttsx3
+import threading
+import speech_recognition as sr
+import time
+
+engine = pyttsx3.init()
+r = sr.Recognizer()
+
+# Shared variable to communicate between threads
+stop_program = False
+
+def speak(text):
+    engine.say(text)
+    engine.runAndWait()
+
+def listen_for_stop_command():
+    global stop_program
+    with sr.Microphone() as source:
+        while not stop_program:
+            try:
+                # Listen for 5 seconds
+                audio_data = r.record(source, duration=5)
+                text = r.recognize_google(audio_data)
+                if text == "stop":
+                    print("Stop command received!")
+                    speak("Stop command received!")
+                    time.sleep(0.5)
+                    stop_program = True
+                    break
+            except sr.UnknownValueError:
+                print("Could not understand audio")
+            except sr.RequestError as e:
+                print("Could not request results; {0}".format(e))
+            # Wait for 1 second before the next listen
+            time.sleep(1)
+
+cv2.startWindowThread()
+
+model_path = "yolov8n.pt"
+
+def load_object_detector(model_path):
+    return YOLO(model_path)
+
+def avoid_obstacle(picam, object_detector):
+    global stop_program
+    picam.preview_configuration.main.size = (480, 480)
+    picam.preview_configuration.main.format = "RGB888"
+    picam.preview_configuration.main.align()
+    picam.configure("preview")
+    picam.start()
+    while not stop_program:
+        frame = picam.capture_array()
+        distance = calculate_distance_to_object()
+        if (distance < 30):
+            print("stop immediately!!!")
+            speak("stop immediately")
+            continue
+        elif (distance < 100):
+            results = object_detector.predict(frame)
+        else:
+             continue
+
+        left_area = 0
+        right_area = 0
+        total_area = frame.shape[0] * frame.shape[1]
+
+        for r in results:
+            annotator = Annotator(frame)
+            boxes = r.boxes
+            for box in boxes:
+                b = box.xyxy[0]
+                c = box.cls
+                annotator.box_label(b, object_detector.names[int(c)])
+
+                box_area = (b[2] - b[0]) * (b[3] - b[1])
+                distance = calculate_distance_to_object()
+
+                center_x = (b[0] + b[2]) / 2
+                if center_x < frame.shape[1] / 2:
+                    left_area += box_area
+                else:
+                    right_area += box_area
+
+        left_free_space = total_area / 2 - left_area
+        right_free_space = total_area / 2 - right_area
+
+        if left_free_space > right_free_space:
+            print("move left")
+            speak("move left")
+        elif right_free_space > left_free_space:
+            print("move right")
+            speak("move right")
+        else:
+            print("Equal space on both sides. Please move straight.")
+            speak("Equal space on both sides. Please move straight.")
+
+        img = annotator.result() 
+        if cv2.waitKey(1) == ord('q'):
+            break
+
+def calculate_distance_to_object():
+    from distance import setup, measure_distance
+    setup()
+    distance = measure_distance() 
+    return distance
+
+def main():
+    global stop_program
+    camera = Picamera2()
+    object_detector = load_object_detector(model_path)
+    stop_thread = threading.Thread(target=listen_for_stop_command)
+    stop_thread.start()
+    avoid_obstacle(camera, object_detector)
+    # Clean up
+    stop_program = True
+    stop_thread.join()  # Wait for the stop_thread to finish
+    camera.close()
+    speak("exiting navigation")
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
+
+
+
+------------------------------------------------------------------------------------------------
+
+
+#distance.py
+
+import RPi.GPIO as GPIO
+import time
+
+# Define GPIO Pins
+TRIG = 23
+ECHO = 24
+
+def setup():
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(TRIG,GPIO.OUT)
+    GPIO.setup(ECHO,GPIO.IN)
+
+def measure_distance():
+    try:
+        while True:
+            GPIO.output(TRIG, False)
+            time.sleep(0.2)
+            
+            GPIO.output(TRIG, True)
+            time.sleep(0.00001)
+            GPIO.output(TRIG, False)
+            
+            while GPIO.input(ECHO)==0:
+                pulse_start = time.time()
+            
+            while GPIO.input(ECHO)==1:
+                pulse_end = time.time()
+            
+            pulse_duration = pulse_end - pulse_start
+            
+            distance = pulse_duration * 17150
+            distance = round(distance, 2)
+            
+            print("Distance: ", distance, "cm")
+            return distance
+            
+    except KeyboardInterrupt: # If there is a KeyboardInterrupt (when you press ctrl+c), exit the program
+        print("Measurement stopped by user")
+        GPIO.cleanup()
+
+def main():
+    setup()
+    measure_distance()
+
+if __name__ == "__main__":
+    main()
+
+
+------------------------------------------------------------------------------------------------
+
+
+#image_captioning_final.py
+from transformers import VisionEncoderDecoderModel, ViTImageProcessor, AutoTokenizer
+import torch
+from PIL import Image
+
+model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+feature_extractor = ViTImageProcessor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+tokenizer = AutoTokenizer.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+
+max_length = 16
+num_beams = 4
+gen_kwargs = {"max_length": max_length, "num_beams": num_beams}
+
+def predict_step(image_paths):
+  images = []
+  for image_path in image_paths:
+    i_image = Image.open(image_path)
+    if i_image.mode != "RGB":
+      i_image = i_image.convert(mode="RGB")
+
+    images.append(i_image)
+
+  pixel_values = feature_extractor(images=images, return_tensors="pt").pixel_values
+  pixel_values = pixel_values.to(device)
+
+  output_ids = model.generate(pixel_values, **gen_kwargs)
+
+  preds = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+  preds = [pred.strip() for pred in preds]
+  return preds
+
+def main(image_path):
+    return predict_step([image_path])
+
+
+
+------------------------------------------------------------------------------------------------
+
+
+#final_ocr.py
+import cv2
+from PIL import Image
+import pytesseract
+
+def extract_text_from_scene(image_path):
+# def extract_text_from_scene():
+    image_path = '/home/austine/Desktop/final_proj/captured_image.jpg'
+
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            raise Exception("Error: Unable to load the image. Check if the file exists and is a valid image.")
+
+        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, thresholded_img = cv2.threshold(gray_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        extracted_text = pytesseract.image_to_string(
+            Image.fromarray(thresholded_img),
+            lang='eng',
+            config='--psm 3 --oem 3'
+        )
+        print(extracted_text.strip())
+        return extracted_text.strip()
+    except Exception as e:
+        return str(e)
+    
+# if __name__ == "__main__":
+#     extract_text_from_scene()
+
+
